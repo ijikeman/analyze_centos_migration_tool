@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# 元に戻す
+# /etc/migrate2ml/backup_release_file /etc/*-releaseファイルのバックアップ先から戻す
+# /etc/migrate2ml 実行履歴保存先
+# BRAND_PKGS 商材名が含まれているパッケージを元に戻す。
+# REMOVE_PKGS CentOS独自のパッケージ(バグレポート等)を元に戻す
+# BOOTLOADER_PKGS grub2関連のbootloaderを元に戻す
+# shim-x86をCentOSの物に戻す
+# sos-releasesをCentOSの物に戻す
+
 # Copyright 2021 Cybertrust Japan Co., Ltd.
 #
 #Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -165,6 +174,7 @@ check_root_user() {
     fi
 }
 
+# /etc/os-releaseファイルでチェック。miracle or centos8.x86_64のみ
 check_supported_os() {
     local ID=$(cat /etc/os-release | grep "^ID=" | cut -f 2 -d '=')
     local VERSION_ID=$(cat /etc/os-release | grep "^VERSION_ID=" | cut -f 2 -d '=')
@@ -227,8 +237,8 @@ core_migrate() {
     migrate_release_pkg
     replace_brand_packages
     remove_specific_pkg
-    upgrade_grub2_pkg
-    upgrade_shim_pkg
+    upgrade_grub2_pkg # grub2当bootloaderパッケージ
+    upgrade_shim_pkg # bootloader関連
     upgrade_sos_report_pkg
 }
 
@@ -237,6 +247,7 @@ configure_bootloaders() {
     register_efi_boot_record
 }
 
+# 引数によりmain処理の分岐
 migrate() {
     # Disable some signals during migration by trap
     trap "" SIGINT SIGTERM
@@ -256,6 +267,7 @@ migrate() {
     trap SIGINT SIGTERM
 }
 
+# ブランドパッケージの入れ替え
 replace_brand_packages() {
     message "Replace brand pkgs."
     for i in "${!BRAND_PKGS[@]}"; do
@@ -288,11 +300,14 @@ replace_os_release() {
     fi
     backup_release_file
     # Pre-download miraclelinux-release
+    # miracle-linuxのリリースファイルをダウンロード(checkの為)
     dnf --releasever 8 --disablerepo=* --enablerepo=ML8-* --downloadonly install -y miraclelinux-release-${ML_RELEASE_VERSION} redhat-release-${RH_RELEASE_VERSION}
     if [ $? -ne 0 ]; then
         warning "Failed to download miraclelinux-release"
         exit 2
     fi
+    
+    # centos-release, centos-linux-releaseを削除
     # Uninstall centos's release pkg
     if rpm -q "centos-release" &> /dev/null; then
         rpm -e --nodeps --allmatches "centos-release"
@@ -301,6 +316,8 @@ replace_os_release() {
         rpm -e --nodeps --allmatches "centos-linux-release"
     fi
     # Install miraclelinux-release
+    # 
+    # miracle-linuxのリリースファイルをダウンロード(実行)
     dnf --releasever 8 --disablerepo=* --enablerepo=ML8-* --setopt=module_platform_id=platform:el8 install -y miraclelinux-release-${ML_RELEASE_VERSION} redhat-release-${RH_RELEASE_VERSION}
     if [ $? -eq 0 -a -e "/etc/miraclelinux-release" ]; then
         message "Replaced os-release pkgs."
@@ -355,6 +372,7 @@ upgrade_shim_pkg() {
     record_progress "upgrade_shim_pkg"
 }
 
+# sosreport RedHatの診断情報収集ツールの置き換え
 upgrade_sos_report_pkg() {
     if check_record "upgrade_sos_report_pkg" ; then
         message "Already upgraded sos."
@@ -373,6 +391,7 @@ upgrade_sos_report_pkg() {
     record_progress "upgrade_sos_report_pkg"
 }
 
+# CentOS独自パッケージの削除
 remove_specific_pkg() {
     if check_record "remove_specific_pkg" ; then
         message "Skip specific package removing."
@@ -394,6 +413,7 @@ migrate_release_pkg() {
     replace_os_release
 }
 
+# CentOS-*.repoをdiasbleに変更
 disable_centos_repo() {
     for repofile in /etc/yum.repos.d/CentOS-*.repo
     do
